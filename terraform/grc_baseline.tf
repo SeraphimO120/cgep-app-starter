@@ -25,3 +25,25 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "uploads" {
     bucket_key_enabled = true
   }
 }
+
+# GAP-04: versioning on PHI uploads (HIPAA 164.308(a)(7))
+resource "aws_s3_bucket_versioning" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+  versioning_configuration { status = "Enabled" }
+}
+
+# GAP-03: deny non-TLS requests (HIPAA 164.312(e)(1))
+resource "aws_s3_bucket_policy" "uploads" {
+  bucket = aws_s3_bucket.uploads.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
+      Principal = "*"
+      Action    = "s3:*"
+      Resource  = [aws_s3_bucket.uploads.arn, "${aws_s3_bucket.uploads.arn}/*"]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
+    }]
+  })
+}
