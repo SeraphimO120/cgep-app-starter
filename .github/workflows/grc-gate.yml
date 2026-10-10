@@ -1,0 +1,180 @@
+# .github/workflows/grc-gate.yml
+#
+# GRC gate for the Acme Health Patient Intake API.
+#   Pull request -> plan role (read-only, no PHI decrypt): plan, policy gate, sign, vault.
+#   Push to main -> apply role: plan, policy gate, apply if the gate passes, sign, vault.
+# Evidence is signed and stored even when the gate fails; the job fails last.
+
+name: grc-gate
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: grc-gate-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+  TF_WORKING_DIR: terraform
+  TF_VERSION: 1.16.5
+  CONFTEST_VERSION: 0.71.0
+  COSIGN_VERSION: v3.1.3
+
+jobs:
+  grc-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ github.event_name == 'pull_request' && vars.AWS_PLAN_ROLE_ARN || vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Install Conftest and Cosign (versions match local tooling)
+        run: |
+          curl -fsSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" \
+            | sudo tar -xz -C /usr/local/bin conftest
+          sudo curl -fsSL -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64"
+          sudo chmod +x /usr/local/bin/cosign
+          conftest --version
+          cosign version
+
+      - name: Record run metadata
+        run: |
+          mkdir -p evidence
+          cat > evidence/run-metadata.json <<META
+          {
+            "run_id": "${{ github.run_id }}",
+            "run_attempt": "${{ github.run_attempt }}",
+            "event": "${{ github.event_name }}",
+            "ref": "${{ github.ref }}",
+            "commit": "${{ github.sha }}",
+            "actor": "${{ github.actor }}",
+            "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "terraform": "${TF_VERSION}",
+            "conftest": "${CONFTEST_VERSION}",
+            "cosign": "${COSIGN_VERSION}"
+          }
+          META
+
+      - name: Policy unit tests
+        run: conftest verify --policy policies | tee evidence/policy-tests.txt
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          terraform init -input=false
+          terraform validate
+          terraform plan -input=false -no-color -out=tfplan | tee ../evidence/plan.txt
+          terraform show -json tfplan > ../evidence/plan.json
+
+      - name: Conftest policy gate
+        id: gate
+        run: |
+          conftest test --policy policies --all-namespaces --output=json evidence/plan.json \
+            > evidence/conftest-results.json || true
+          FAILS=$(python3 -c 'import json; d=json.load(open("evidence/conftest-results.json")); print(sum(len(r.get("failures") or []) for r in d))')
+          WARNS=$(python3 -c 'import json; d=json.load(open("evidence/conftest-results.json")); print(sum(len(r.get("warnings") or []) for r in d))')
+          echo "failures=${FAILS}" >> "$GITHUB_OUTPUT"
+          echo "warnings=${WARNS}" >> "$GITHUB_OUTPUT"
+          echo "Policy gate: ${FAILS} failure(s), ${WARNS} warning(s)"
+          conftest test --policy policies --all-namespaces evidence/plan.json || true
+
+      - name: Terraform apply (main only, gate must pass)
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.gate.outputs.failures == '0'
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -input=false -no-color tfplan | tee ../evidence/apply.txt
+
+      - name: Bundle, sign, and upload to vault
+        id: sign
+        if: always()
+        env:
+          VAULT: ${{ vars.EVIDENCE_VAULT }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          BUNDLE="evidence-${RUN_ID}-${SHA}.tar.gz"
+          tar -czf "${BUNDLE}" -C evidence .
+          sha256sum "${BUNDLE}" | awk '{print $1}' > "${BUNDLE}.sha256"
+
+          # Keyless signing: the GitHub OIDC identity of this workflow run is the signer.
+          cosign sign-blob --yes --bundle "${BUNDLE}.sigstore.json" "${BUNDLE}"
+
+          PREFIX="runs/${RUN_ID}"
+          aws s3 cp "${BUNDLE}"                "s3://${VAULT}/${PREFIX}/${BUNDLE}"
+          aws s3 cp "${BUNDLE}.sha256"         "s3://${VAULT}/${PREFIX}/${BUNDLE}.sha256"
+          aws s3 cp "${BUNDLE}.sigstore.json"  "s3://${VAULT}/${PREFIX}/${BUNDLE}.sigstore.json"
+
+          VERSION_ID=$(aws s3api head-object --bucket "${VAULT}" --key "${PREFIX}/${BUNDLE}" --query VersionId --output text)
+          RETAIN=$(aws s3api head-object --bucket "${VAULT}" --key "${PREFIX}/${BUNDLE}" --query ObjectLockRetainUntilDate --output text)
+          cat > receipt.json <<RECEIPT
+          {
+            "run_id": "${RUN_ID}",
+            "commit": "${SHA}",
+            "vault": "${VAULT}",
+            "bundle_key": "${PREFIX}/${BUNDLE}",
+            "version_id": "${VERSION_ID}",
+            "retain_until": "${RETAIN}",
+            "sha256": "$(cat "${BUNDLE}.sha256")"
+          }
+          RECEIPT
+          aws s3 cp receipt.json "s3://${VAULT}/${PREFIX}/receipt.json"
+          cat receipt.json
+
+      - name: Upload evidence artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: grc-evidence-${{ github.run_id }}
+          path: |
+            evidence/
+            evidence-${{ github.run_id }}-*
+            receipt.json
+          retention-days: 90
+
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: |
+            ## GRC gate run ${{ github.run_id }}
+
+            - Policy gate: **${{ steps.gate.outputs.failures }} failure(s)**, ${{ steps.gate.outputs.warnings }} warning(s)
+            - Sign and vault upload: `${{ steps.sign.outcome }}`
+            - Evidence: `s3://${{ vars.EVIDENCE_VAULT }}/runs/${{ github.run_id }}/`
+
+      - name: Enforce gate decision
+        if: always()
+        env:
+          FAILS: ${{ steps.gate.outputs.failures }}
+        run: |
+          if [ -z "${FAILS}" ]; then
+            echo "GRC gate FAILED: the policy gate never ran. Check the earlier steps."
+            exit 1
+          fi
+          if [ "${FAILS}" != "0" ]; then
+            echo "GRC gate FAILED: ${FAILS} policy failure(s). Evidence was signed and stored."
+            exit 1
+          fi
+          echo "GRC gate PASSED."
