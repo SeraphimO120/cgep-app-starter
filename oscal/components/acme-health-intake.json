@@ -3,8 +3,8 @@
     "uuid": "441f1d74-040d-4a85-a974-b36fc05a0b9f",
     "metadata": {
       "title": "Acme Health Patient Intake API with HIPAA GRC controls",
-      "last-modified": "2026-10-10T15:00:00.000000+00:00",
-      "version": "1.1.0",
+      "last-modified": "2026-10-10T19:00:00.000000+00:00",
+      "version": "1.2.0",
       "oscal-version": "1.2.1",
       "roles": [
         {
@@ -42,7 +42,7 @@
         "uuid": "e7ff722d-05bd-4b4f-9840-823e6063ea19",
         "type": "service",
         "title": "Acme Health Patient Intake API",
-        "description": "The cgep-app-starter Patient Intake API (API Gateway HTTP API, Lambda, DynamoDB, S3) deployed in us-east-1, wrapped with a customer-managed KMS key, an Object Lock evidence vault, a multi-region CloudTrail trail, OIDC-based CI identities, and a GitHub Actions gate that plans, checks five HIPAA Rego policies, applies on merge to main, signs evidence with Cosign, and uploads it to the vault.",
+        "description": "The cgep-app-starter Patient Intake API (API Gateway HTTP API, Lambda, DynamoDB, S3) deployed in us-east-1, wrapped with a customer-managed KMS key, an Object Lock evidence vault, a multi-region CloudTrail trail, OIDC-based CI identities, and a GitHub Actions gate that plans, checks five HIPAA Rego policies, applies on merge to main, signs evidence with Cosign, and uploads it to the vault. Continuous monitoring: an AWS Config recorder with eight managed rules that mirror the Rego gate, EventBridge rules that alert on non-compliance and on control-relevant changes made outside the pipeline, and a nightly pipeline run that checks for drift and runs eleven live control tests.",
         "purpose": "Receive patient intake submissions (PHI) and keep the infrastructure that stores them audit-defensible under the HIPAA Security Rule.",
         "props": [
           {
@@ -118,6 +118,38 @@
                     "name": "secondary-control",
                     "class": "cmmc-l2",
                     "value": "SC.L2-3.13.11"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T01"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T02"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T03"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T04"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-s3-uploads-cmk"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-s3-evidence-cmk"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-dynamodb-cmk"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-kms-rotation"
                   }
                 ],
                 "links": [
@@ -130,6 +162,16 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
                     "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
@@ -175,6 +217,14 @@
                     "name": "secondary-control",
                     "class": "cmmc-l2",
                     "value": "SC.L2-3.13.8"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T05"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-s3-tls-only"
                   }
                 ],
                 "links": [
@@ -187,6 +237,16 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
                     "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
@@ -232,6 +292,14 @@
                     "name": "secondary-control",
                     "class": "cmmc-l2",
                     "value": "MP.L2-3.8.9"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T06"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-s3-versioning"
                   }
                 ],
                 "links": [
@@ -244,13 +312,23 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
                     "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
               {
                 "uuid": "90587faa-4fce-4e08-8e5b-f36351c9ae5d",
                 "control-id": "hipaa-164.312-a-1",
-                "description": "The intake Lambda role is reduced from dynamodb:* and s3:* to dynamodb:PutItem on the submissions table, s3:PutObject on the uploads/ prefix, and the KMS actions needed for its key (GAP-07). Pipeline access is split: pull requests assume a read-only plan role that cannot decrypt PHI, and only pushes to main assume the apply role. The Rego policy fails the gate on any wildcard action in an IAM Allow statement; red PR run 38051205888 shows the gate blocking a reintroduced dynamodb:*.",
+                "description": "The intake Lambda role is reduced from dynamodb:* and s3:* to dynamodb:PutItem on the submissions table, s3:PutObject on the uploads/ prefix, and the KMS actions needed for its key (GAP-07). Pipeline access is split: pull requests assume a read-only plan role that cannot decrypt PHI, and only pushes to main assume the apply role. The Rego policy fails the gate on any wildcard action in an IAM Allow statement; red PR run 38051205888 shows the gate blocking a reintroduced dynamodb:*. Continuously, an EventBridge rule alerts on any role-policy or trust-policy change made outside the pipeline's apply role; AWS Config managed rules do not evaluate inline role policies, so this alert is the live-state control for this requirement.",
                 "props": [
                   {
                     "name": "hipaa-citation",
@@ -293,6 +371,10 @@
                     "name": "secondary-control",
                     "class": "cmmc-l2",
                     "value": "AC.L2-3.1.5"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T07"
                   }
                 ],
                 "links": [
@@ -315,13 +397,23 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051205888/evidence-38051205888-826b40ec9ccd72556cf0fbc8f664499885aae124.tar.gz.sigstore.json",
                     "text": "Red PR run 38051205888 (gate blocked GAP-07 regression): Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
               {
                 "uuid": "75a7f1be-8306-4265-8017-76b89a6cbc63",
                 "control-id": "hipaa-164.312-b",
-                "description": "A multi-region CloudTrail trail records management events, including global services, to a dedicated, versioned bucket with log-file validation enabled. Every pipeline run records its plan, policy results, and run metadata as a signed evidence bundle.",
+                "description": "A multi-region CloudTrail trail records management events, including global services, to a dedicated, versioned bucket with log-file validation enabled. Every pipeline run records its plan, policy results, and run metadata as a signed evidence bundle. AWS Config records the governed resource types continuously, and the pipeline runs nightly, so activity and configuration are captured between deploys, not only at deploy time.",
                 "props": [
                   {
                     "name": "hipaa-citation",
@@ -348,6 +440,22 @@
                     "name": "secondary-control",
                     "class": "cmmc-l2",
                     "value": "AU.L2-3.3.1"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T08"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T09"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-cloudtrail-multi-region"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_config_configuration_recorder.main"
                   }
                 ],
                 "links": [
@@ -360,6 +468,16 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
                     "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
@@ -387,6 +505,14 @@
                   {
                     "name": "terraform-resource",
                     "value": "aws_cloudtrail.mgmt"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T10"
+                  },
+                  {
+                    "name": "config-rule",
+                    "value": "acme-health-intake-cloudtrail-log-validation"
                   }
                 ],
                 "links": [
@@ -409,6 +535,16 @@
                     "rel": "evidence",
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38050849986/evidence-38050849986-e86d043a94e0c1c70f830ec2deec1dce9ef61761.tar.gz.sigstore.json",
                     "text": "Merge run 38050849986 (apply on merge to main): Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
                   }
                 ]
               },
@@ -451,6 +587,68 @@
                   }
                 ],
                 "remarks": "Implemented for infrastructure change: only authenticated GitHub workflow identities can plan or apply. Not implemented at the API layer: the intake endpoint accepts unauthenticated POST requests. API authentication is out of scope for the starter (WORKLOAD.md) and is listed as a known gap in WRITEUP.md."
+              },
+              {
+                "uuid": "5c9f4751-355d-4b5d-a270-0c734b68f9e9",
+                "control-id": "hipaa-164.308-a-1-ii-d",
+                "description": "Information system activity is reviewed through automated collection and alerting. AWS Config evaluates eight managed rules against the live account; an EventBridge rule routes any NON_COMPLIANT result to an SNS topic, and a second rule alerts on control-relevant API calls (IAM, KMS, S3, CloudTrail, DynamoDB, Config) made by any identity other than the pipeline's apply role. A nightly pipeline run checks for drift between main and the live account and runs eleven live control tests; its results are signed and stored in the vault.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.308(a)(1)(ii)(D)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "partial"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_config_configuration_recorder.main"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_config_config_rule.hipaa"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_cloudwatch_event_rule.config_noncompliant"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_cloudwatch_event_rule.out_of_band_change"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_sns_topic.grc_alerts"
+                  },
+                  {
+                    "name": "live-test",
+                    "value": "scripts/control-tests.sh T09"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "CC7.2"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "SI.L2-3.14.6"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz",
+                    "text": "Drift run 38072307218: signed bundle with drift.txt and control-tests.json (11 live tests)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38072307218/evidence-38072307218-6965a1a526a1bc5c45185594bd596fd0af50034d.tar.gz.sigstore.json",
+                    "text": "Drift run 38072307218: Cosign signature bundle."
+                  }
+                ],
+                "remarks": "Partial: collection, evaluation, and alert routing are automated. The human review cadence for alerts and Config findings is an organizational process that is not codified in this repository."
               }
             ],
             "props": [

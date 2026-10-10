@@ -60,3 +60,32 @@ No official OSCAL catalog exists for HIPAA, so the component cites SP 800-66 Rev
 
 **17. Verification pinned to this workflow's identity.**
 The reference verify script accepted any signer (`.*`). `scripts/verify-evidence.sh` requires the certificate identity to be this repo's `grc-gate.yml`, which proves who signed, not just that something was signed.
+
+## 2026-10-10: After first review
+
+**18. Continuous monitoring with AWS Config managed rules.**
+Eight managed rules mirror the Rego gate against the live account, each tagged with its 164.x control. Managed over custom rules because AWS maintains them and there is no rule code to keep correct. The recorder covers only the six resource types this system governs, which keeps cost to cents, and delivers to the CloudTrail bucket under `config/` instead of a new bucket. KMS rules are pinned to the PHI key ARN, so encryption under any other key fails.
+
+**19. Two alert paths: non-compliance and out-of-band change.**
+EventBridge routes NON_COMPLIANT Config results, and control-relevant API calls by any identity other than the apply role, to one SNS topic. The second path exists because out-of-band changes skip the gate and its evidence, and because no managed rule evaluates inline role policies, so it is the live-state control for GAP-07. Going forward, local applies will alert by design: governed resources should change only through the pipeline.
+
+**20. Alert subscription created outside Terraform; topic on default encryption.**
+The subscriber email would otherwise sit in a public repo and in every plan inside the evidence bundles. The topic does not use the CMK because EventBridge can only publish to a CMK-encrypted topic if the key policy grants it; alerts carry resource names and API metadata, not PHI.
+
+**21. Live control tests in every bundle.**
+`scripts/control-tests.sh` runs eleven tests against the deployed stack after every apply and every night, and writes JSON into the signed bundle. Plan-time checks prove intent; these prove the controls operate. The TLS test sends a real plaintext request and expects 403; the least-privilege test uses IAM policy simulation rather than attempting destructive calls against PHI stores.
+
+**22. Nightly drift run under the read-only role.**
+Scheduled and manual runs assume the plan role, whose trust now also accepts `main`. A nightly check needs to read everything and change nothing. Drift is a plan with changes, detected with `-detailed-exitcode`. The job fails only after the evidence is signed and stored.
+
+**23. Zip file mode pinned to remove false drift.**
+`archive_file` embeds file permissions. Linux Mint creates files as `664` and GitHub's checkout as `644`, so laptop and CI produced different Lambda hashes and each saw the other's deploy as drift. `output_file_mode = "0644"` makes the artifact identical everywhere.
+
+**24. Every step runs under `bash -eo pipefail`.**
+GitHub's default `bash -e` does not set `pipefail`, so `terraform apply | tee` could report success on a failed apply. Found while adding the drift step; fixed at the job level.
+
+**25. Supply-chain hygiene.**
+All actions pinned to full commit SHAs on their current major versions (behavior unchanged, tag hijack ruled out). `.terraform.lock.hcl` committed so CI uses the provider builds tested locally. Adaptive retries on all AWS calls in the pipeline. The run-metadata step reads runner environment variables and builds JSON with `jq` instead of interpolating `${{ }}` into the script.
+
+**26. State bucket TLS deny added out of band.**
+The account-wide `s3-tls-only` rule would have flagged the remote-state bucket. Added a TLS-deny bucket policy with the AWS CLI before enabling Config. The bucket remains outside Terraform, which is still listed as a trade-off.

@@ -1,13 +1,15 @@
 # Acme Health Patient Intake API: HIPAA GRC capstone
 
-A fork of `cgep-app-starter` made audit-defensible under the **HIPAA Security Rule**. Every push to `main` is planned, checked against five HIPAA Rego policies, applied only if the gate passes, and recorded as a signed evidence bundle in an Object Lock vault. Reasoning is in [WRITEUP.md](WRITEUP.md); the decision record is in [DECISIONS.md](DECISIONS.md).
+A fork of `cgep-app-starter` made audit-defensible under the **HIPAA Security Rule**. Every push to `main` is planned, checked against five HIPAA Rego policies, applied only if the gate passes, tested live, and recorded as a signed evidence bundle in an Object Lock vault. Between deploys, AWS Config and EventBridge watch the live account and a nightly run checks for drift. Reasoning is in [WRITEUP.md](WRITEUP.md), the control matrix in [CONTROLS.md](CONTROLS.md), and the decision record in [DECISIONS.md](DECISIONS.md).
 
 ```mermaid
 flowchart LR
   PR[Pull request] --> Plan --> Check[Policy check]
   Check -->|main, 0 failures| Apply
   Check --> Sign
-  Apply --> Sign --> Upload[Upload to Object Lock vault]
+  Apply --> Tests[Live control tests] --> Sign --> Upload[Upload to Object Lock vault]
+  Nightly[Nightly drift run] --> Plan
+  Config[AWS Config rules] --> Alerts[EventBridge to SNS alerts]
 ```
 
 ## At a glance
@@ -17,20 +19,23 @@ flowchart LR
 | Primary framework | HIPAA Security Rule; OSCAL catalog source NIST SP 800-66 Rev. 2 |
 | Gaps closed (Terraform + policy) | GAP-01, 02, 03, 04, 07 |
 | Gaps open | GAP-05, 06, 08 (approach in WRITEUP.md) |
-| Policies | 5 Rego policies, 18 unit tests |
+| Policies | 5 Rego policies, 26 unit tests |
+| Live tests | 11, after every apply and nightly |
+| Continuous monitoring | 8 AWS Config rules; alerts on non-compliance and out-of-band changes |
 | Green PR | [#1](https://github.com/SeraphimO120/cgep-app-starter/pull/1), passed and merged |
 | Red PR | [#2](https://github.com/SeraphimO120/cgep-app-starter/pull/2), reintroduces `dynamodb:*`, blocked by GAP-07 policy |
-| Verified run | 38051692529 on `main`, `CHAIN INTACT`, retained until 2026-11-09 |
+| Verified runs | 38051692529 on `main` (`CHAIN INTACT`); 38072307218 drift run (no drift, 11/11 live tests) |
 
 ## Layout
 
 | Path | Contents |
 |---|---|
-| `terraform/` | Starter workload plus `grc_baseline.tf` (KMS, gap fixes), `grc_evidence.tf` (vault, CloudTrail), `grc_pipeline.tf` (OIDC roles), `backend.tf` |
+| `terraform/` | Starter workload plus `grc_baseline.tf` (KMS, gap fixes), `grc_evidence.tf` (vault, CloudTrail), `grc_pipeline.tf` (OIDC roles), `grc_monitoring.tf` (Config, EventBridge, SNS), `backend.tf` |
 | `policies/` | Five HIPAA Rego policies and their tests |
-| `.github/workflows/grc-gate.yml` | Plan, Policy check, Apply, Sign, Upload |
+| `.github/workflows/grc-gate.yml` | Plan, Policy check, Apply, Sign, Upload; nightly drift and live tests |
 | `oscal/` | Component definition and profile |
 | `scripts/verify-evidence.sh` | SHA-256, Cosign, and Object Lock checks for one run |
+| `scripts/control-tests.sh` | 11 live control tests against the deployed stack |
 
 Tools: Terraform 1.16.5, OPA 1.21, Conftest 0.71.0, Cosign v3.1.3, compliance-trestle 5.1.0.
 
@@ -66,7 +71,17 @@ scripts/verify-evidence.sh 38051692529
 
 Prints `CHAIN INTACT` when the hash matches, the signature verifies against this repo's workflow identity, and Object Lock retention is active.
 
-**4. OSCAL.** Trestle validates inside a workspace:
+**4. Live controls.** Requires AWS read access and `jq`; run from the repo root after `terraform -chdir=terraform init`.
+
+```bash
+scripts/control-tests.sh
+aws configservice describe-compliance-by-config-rule \
+  --query 'ComplianceByConfigRules[].[ConfigRuleName,Compliance.ComplianceType]' --output table
+```
+
+Without AWS access, the same results are in `evidence/control-tests.json` inside any `main`, nightly, or manual run's artifact.
+
+**5. OSCAL.** Trestle validates inside a workspace:
 
 ```bash
 mkdir -p .trestle-work && cd .trestle-work && trestle init

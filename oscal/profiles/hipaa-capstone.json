@@ -3,8 +3,8 @@
     "uuid": "b3374357-387d-4fc3-80fb-9f940f16dc33",
     "metadata": {
       "title": "Acme Health HIPAA capstone control selection",
-      "last-modified": "2026-10-10T13:00:00.000000+00:00",
-      "version": "1.0.0",
+      "last-modified": "2026-10-10T19:00:00.000000+00:00",
+      "version": "1.1.0",
       "oscal-version": "1.2.1"
     },
     "imports": [
@@ -19,7 +19,8 @@
               "hipaa-164.312-a-1",
               "hipaa-164.312-b",
               "hipaa-164.312-c-1",
-              "hipaa-164.312-d"
+              "hipaa-164.312-d",
+              "hipaa-164.308-a-1-ii-d"
             ]
           }
         ]

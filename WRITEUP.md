@@ -19,7 +19,9 @@ Scope stays honest about what code can prove. This build implements Technical Sa
 | GAP-06 | No concurrency limit, DLQ, or tracing | No HIPAA mapping | Open | None | CC7.2; SI.L2-3.14.6 |
 | GAP-08 | No API access logging or throttling | 164.312(b) | Open | None | CC7.2; AU.L2-3.3.1 |
 
-Beyond the gaps, the baseline adds one customer-managed KMS key with rotation, an Object Lock evidence vault, a multi-region CloudTrail trail with log-file validation, remote state in S3, and two GitHub OIDC roles. The five policies carry 18 unit tests (`opa test policies`), each with passing and failing fixtures.
+Beyond the gaps, the baseline adds one customer-managed KMS key with rotation, an Object Lock evidence vault, a multi-region CloudTrail trail with log-file validation, remote state in S3, two GitHub OIDC roles, and a continuous monitoring layer. The five policies carry 26 unit tests (`opa test policies`), with passing, failing, and edge-case fixtures.
+
+Each closed gap is enforced at four points in time: a Rego policy at plan time, a live test after every apply and every night, an AWS Config rule continuously, and an EventBridge alert when someone changes the control outside the pipeline. [CONTROLS.md](CONTROLS.md) traces every control through all four in one table.
 
 One finding came from the policy suite itself. Writing `hipaa_s3_tls` exposed that the CloudTrail bucket I had just built had no TLS deny. I fixed the bucket rather than exempting it, so the policy passes for an honest reason.
 
@@ -68,11 +70,35 @@ The job fails last, after evidence is stored. A blocked change leaves the same s
 
 `scripts/verify-evidence.sh` returned `CHAIN INTACT` for 38051692529 and for the red run 38051205888. The OSCAL component links to both, so an assessor can start at a control, follow its evidence link into the vault, and verify the object.
 
+## Continuous monitoring and detection
+
+Plan-time checks prove what the pipeline intended. They say nothing about what happens to the account between deploys. The monitoring layer (`terraform/grc_monitoring.tf`) covers that window.
+
+**AWS Config as the live-state twin of the gate.** A recorder limited to the six resource types this system governs feeds eight AWS managed rules: KMS encryption under the PHI key for the uploads bucket, the vault, and the table; SSL-only requests and versioning on every bucket; key rotation; and CloudTrail multi-region and log-file validation. Each rule is tagged with its 164.x control. Managed rules were the right tool here because they are maintained by AWS and need no code of mine to keep correct.
+
+**Alert routing.** Two EventBridge rules publish to one SNS topic. The first fires when any of these Config rules evaluates a resource as NON_COMPLIANT. The second fires on control-relevant API calls (role and trust policy changes, key disablement or deletion, bucket policy, encryption, versioning, Object Lock changes, CloudTrail and Config being stopped or deleted) made by any identity other than the pipeline's apply role. That second rule exists because an out-of-band change bypasses the gate and leaves no evidence bundle, and because managed Config rules cannot evaluate the Lambda's inline role policy, so it is the live-state control for GAP-07. I verified the path end to end with a deliberate no-op `PutBucketVersioning` from my own user, which produced an alert.
+
+**Nightly drift and live control tests.** The same workflow runs every night at 06:17 UTC under the read-only plan role. The plan must show no changes, and `scripts/control-tests.sh` runs eleven tests against the deployed stack: encryption under the PHI key on the bucket, vault, and table; key rotation; a real plaintext HTTP request refused with 403 while HTTPS succeeds; versioning; an IAM policy simulation proving the Lambda role can `PutItem` and `PutObject` but not `Scan`, `DeleteItem`, `GetObject`, or `DeleteObject`; CloudTrail and Config recording; Object Lock retention; and an end-to-end intake submission. Results are written into the signed bundle, so the vault holds a daily, signed record that the controls are operating, not only that they were planned. The same tests run after every apply on `main`.
+
+**What the first runs taught me.**
+- *False drift.* My first local plan after a CI apply wanted to update the Lambda with no code change. Linux Mint creates files as `664`; GitHub's checkout creates them as `644`; `archive_file` bakes the mode into the zip, so each environment saw the other's deploy as drift. Setting `output_file_mode = "0644"` makes the zip identical everywhere. A nightly drift check that cries wolf gets ignored, so this mattered.
+- *A masked failure.* GitHub runs steps with `bash -e` but without `pipefail` unless the shell is set explicitly, so `terraform apply | tee` would have reported success on a failed apply. Every step now runs under `bash -eo pipefail`.
+- *My own residual gap.* The account-wide SSL rule would have flagged the remote-state bucket, which had no TLS deny. I added one before turning Config on.
+
+**Runs an assessor can verify (monitoring):**
+
+| Run | Event | Result |
+|---|---|---|
+| 38071713294 | Push to `main` | Monitoring deployed by the apply role; 11 of 11 live tests passed |
+| 38072307218 | Manual drift run | No drift; 11 of 11 live tests passed; evidence signed |
+
 ## Trade-offs and what I'd do with another sprint
 
-- **Plan-time blind spot.** `hipaa_s3_tls` and `hipaa_iam_least_privilege` read rendered policy JSON, which Terraform cannot compute for resources that do not exist yet. In that case the policies warn instead of failing, so a first-time deploy is not blocked. Against the existing stack every policy is fully evaluated. The fix is a post-apply check of the same rules against live state or AWS Config.
+- **Plan-time blind spot, now covered after apply.** `hipaa_s3_tls` and `hipaa_iam_least_privilege` read rendered policy JSON, which Terraform cannot compute for resources that do not exist yet, so they warn instead of failing on a first deploy. The live tests (T05, T07) and the `s3-tls-only` Config rule now check the deployed result, which closes that window.
+- **Config cannot see inline role policies.** No managed rule evaluates an inline policy for wildcards, so GAP-07 relies on the live IAM simulation (T07) and the out-of-band alert. A custom Config rule backed by a small Lambda would close it fully.
 - **Apply role breadth.** The apply role holds `AdministratorAccess` because the stack spans KMS, IAM, VPC, Lambda, API Gateway, and CloudTrail. Next step: a scoped deploy policy generated from CloudTrail activity over a few weeks of runs.
-- **State bucket outside the gate.** The remote-state bucket was bootstrapped with the AWS CLI (Terraform cannot create the bucket that holds its own state). It is versioned and blocks public access, but it sits outside Terraform and outside the policy suite, with no TLS deny or CMK. Next step: a small bootstrap configuration with its own policy run.
+- **State bucket outside the gate.** The remote-state bucket was bootstrapped with the AWS CLI (Terraform cannot create the bucket that holds its own state). It is versioned, blocks public access, and now denies non-TLS requests, and the account-wide Config rules watch it, but it is still outside Terraform and the Rego suite. Next step: a small bootstrap configuration with its own policy run.
+- **Alert channel.** The SNS topic uses default encryption rather than the CMK, because EventBridge can publish to a CMK-encrypted topic only if the key policy grants it, and alerts carry resource names and API metadata, never PHI. The email subscription was created with the AWS CLI so the address stays out of this public repo and its evidence bundles. Production would route to a paging or ticketing system with an owner and a response time.
 - **Separate evidence account and COMPLIANCE mode,** as described above.
 
 ## What I didn't get to
@@ -85,8 +111,22 @@ The job fails last, after evidence is stored. A blocked change leaves the same s
 
 - **Patient data lifecycle.** There is no deletion, export, or retention schedule for submissions. `WORKLOAD.md` calls this out as a known gap. Approach: a documented retention period enforced with S3 lifecycle rules and DynamoDB TTL, with versioned objects expiring after the same window, and an export path for patient requests. Retention has to be weighed against the versioning added for GAP-04, which deliberately keeps old object versions.
 - **API-layer authentication.** The intake endpoint accepts unauthenticated requests. `WORKLOAD.md` scopes API authentication out of the capstone, so the OSCAL marks 164.312(d) as **partial**: the pipeline authenticates with OIDC, the API does not. Approach: a JWT authorizer on the HTTP API backed by the patient portal's identity provider.
-- **Runner maintenance.** GitHub flagged that the Node 20 actions in this workflow are deprecated and that `ubuntu-latest` moves to Ubuntu 26 starting 2026-10-19. Pinning the runner image and upgrading the action versions keeps future runs reproducible.
+- **Runner maintenance.** Every action is now pinned to a full commit SHA, and the Terraform provider lock file is committed. The pinned actions still target Node 20, which GitHub has deprecated, and `ubuntu-latest` moves to Ubuntu 26 starting 2026-10-19. Next: move each action to its current major version (pinned by SHA) and pin the runner image.
+
+## Changes after first review
+
+The first automated review scored this repo 75 and named three gaps. Each was addressed in the repo, not just in this document.
+
+| Review finding | Change |
+|---|---|
+| No LICENSE; semgrep HIGH shell injection in the run-metadata step; mutable action tags | MIT `LICENSE`; the step now reads runner environment variables and builds JSON with `jq`; all actions pinned to commit SHAs. Semgrep's full GitHub Actions ruleset reports zero findings. |
+| No continuous monitoring or detection | AWS Config with eight managed rules, two EventBridge alert rules with SNS routing, and a nightly drift run. |
+| No integration-level tests | `scripts/control-tests.sh`: eleven live tests after every apply and every night, results signed into the evidence bundle. |
+| `terraform fmt` diffs, unused declaration, lock file not committed | Formatted, removed the unused `github_repo` local, committed `.terraform.lock.hcl`. |
+| Limited edge-case coverage in unit tests | Eight edge-case tests added (26 total), including an AWS-managed key passed by alias and an inverted TLS condition. |
+| Mapping only in OSCAL JSON | [CONTROLS.md](CONTROLS.md), a human-readable control matrix. |
+| No failure handling on uploads | Adaptive retries on every AWS call in the pipeline. |
 
 ## Reflection
 
-The most useful moments were the failures. The first pipeline run could not authenticate, and CloudTrail's record of the rejected token showed exactly why: GitHub had moved to immutable subjects, and the fix was also the stronger design. The policy suite caught a gap in infrastructure I had built that same week. Both reinforced the point of the course: controls are only as good as the evidence that they ran, and a gate earns trust when it can fail, record the failure, and hand an assessor something they can verify without ever meeting the engineer.
+The most useful moments were the failures. The first pipeline run could not authenticate, and CloudTrail's record of the rejected token showed exactly why: GitHub had moved to immutable subjects, and the fix was also the stronger design. The policy suite caught a gap in infrastructure I had built that same week. The review round added a third lesson: a gate that only runs at deploy time is a snapshot, and the drift check paid for itself on its first run by exposing a false-drift source I would otherwise have chased for weeks. All three reinforced the point of the course: controls are only as good as the evidence that they ran, and a gate earns trust when it can fail, record the failure, and hand an assessor something they can verify without ever meeting the engineer.
