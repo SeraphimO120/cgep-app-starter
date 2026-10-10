@@ -147,9 +147,10 @@ resource "aws_s3_bucket" "uploads" {
 ######################################################################
 
 data "archive_file" "handler" {
-  type        = "zip"
-  source_file = "${path.module}/lambda/handler.py"
-  output_path = "${path.module}/lambda/handler.zip"
+  type             = "zip"
+  source_file      = "${path.module}/lambda/handler.py"
+  output_path      = "${path.module}/lambda/handler.zip"
+  output_file_mode = "0666"
 }
 
 resource "aws_iam_role" "lambda" {
