@@ -112,6 +112,7 @@ jobs:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
+          mkdir -p evidence
           BUNDLE="evidence-${RUN_ID}-${SHA}.tar.gz"
           tar -czf "${BUNDLE}" -C evidence .
           sha256sum "${BUNDLE}" | awk '{print $1}' > "${BUNDLE}.sha256"
@@ -165,9 +166,15 @@ jobs:
 
       - name: Enforce gate decision
         if: always()
+        env:
+          FAILS: ${{ steps.gate.outputs.failures }}
         run: |
-          if [ "${{ steps.gate.outputs.failures }}" != "0" ]; then
-            echo "GRC gate FAILED: ${{ steps.gate.outputs.failures }} policy failure(s). Evidence was signed and stored."
+          if [ -z "${FAILS}" ]; then
+            echo "GRC gate FAILED: the policy gate never ran. Check the earlier steps."
+            exit 1
+          fi
+          if [ "${FAILS}" != "0" ]; then
+            echo "GRC gate FAILED: ${FAILS} policy failure(s). Evidence was signed and stored."
             exit 1
           fi
           echo "GRC gate PASSED."

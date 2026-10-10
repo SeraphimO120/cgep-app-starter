@@ -14,10 +14,10 @@ locals {
 ######################################################################
 
 locals {
-  github_repo  = "SeraphimO120/cgep-app-starter"
-  state_bucket = "acme-health-intake-tfstate-5434b2b8"
+  github_repo       = "SeraphimO120/cgep-app-starter"
+  github_sub_prefix = "repo:SeraphimO120@324516250/cgep-app-starter@1404925327"
+  state_bucket      = "acme-health-intake-tfstate-5434b2b8"
 }
-
 # ---------- Plan role: pull requests only ----------
 
 resource "aws_iam_role" "gha_plan" {
@@ -31,7 +31,7 @@ resource "aws_iam_role" "gha_plan" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:pull_request"
+          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:pull_request"
         }
       }
     }]
@@ -84,7 +84,7 @@ resource "aws_iam_role" "gha_apply" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:ref:refs/heads/main"
         }
       }
     }]
