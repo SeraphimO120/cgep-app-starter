@@ -1,0 +1,32 @@
+{
+  "profile": {
+    "uuid": "b3374357-387d-4fc3-80fb-9f940f16dc33",
+    "metadata": {
+      "title": "Acme Health HIPAA capstone control selection",
+      "last-modified": "2026-10-10T13:00:00.000000+00:00",
+      "version": "1.0.0",
+      "oscal-version": "1.2.1"
+    },
+    "imports": [
+      {
+        "href": "https://doi.org/10.6028/NIST.SP.800-66r2",
+        "include-controls": [
+          {
+            "with-ids": [
+              "hipaa-164.312-a-2-iv",
+              "hipaa-164.312-e-1",
+              "hipaa-164.308-a-7-ii-a",
+              "hipaa-164.312-a-1",
+              "hipaa-164.312-b",
+              "hipaa-164.312-c-1",
+              "hipaa-164.312-d"
+            ]
+          }
+        ]
+      }
+    ],
+    "merge": {
+      "as-is": true
+    }
+  }
+}

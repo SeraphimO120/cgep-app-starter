@@ -16,3 +16,4 @@ terraform/lambda/handler.zip
 evidence/
 .DS_Store
 plan.json
+.trestle-work/

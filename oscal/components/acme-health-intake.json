@@ -1,0 +1,410 @@
+{
+  "component-definition": {
+    "uuid": "441f1d74-040d-4a85-a974-b36fc05a0b9f",
+    "metadata": {
+      "title": "Acme Health Patient Intake API with HIPAA GRC controls",
+      "last-modified": "2026-10-10T13:00:00.000000+00:00",
+      "version": "1.0.0",
+      "oscal-version": "1.2.1",
+      "roles": [
+        {
+          "id": "provider",
+          "title": "Provider"
+        },
+        {
+          "id": "prepared-by",
+          "title": "Prepared By"
+        }
+      ],
+      "parties": [
+        {
+          "uuid": "b689b489-345a-42f2-b68f-8fe37bf82bea",
+          "type": "organization",
+          "name": "Acme Health"
+        },
+        {
+          "uuid": "1c85d00d-ff70-4ce6-bf8b-d8e68bd0f5bb",
+          "type": "person",
+          "name": "Seraphim Omisade"
+        }
+      ],
+      "responsible-parties": [
+        {
+          "role-id": "prepared-by",
+          "party-uuids": [
+            "1c85d00d-ff70-4ce6-bf8b-d8e68bd0f5bb"
+          ]
+        }
+      ]
+    },
+    "components": [
+      {
+        "uuid": "e7ff722d-05bd-4b4f-9840-823e6063ea19",
+        "type": "service",
+        "title": "Acme Health Patient Intake API",
+        "description": "The cgep-app-starter Patient Intake API (API Gateway HTTP API, Lambda, DynamoDB, S3) deployed in us-east-1, wrapped with a customer-managed KMS key, an Object Lock evidence vault, a multi-region CloudTrail trail, OIDC-based CI identities, and a GitHub Actions gate that plans, checks five HIPAA Rego policies, applies on merge to main, signs evidence with Cosign, and uploads it to the vault.",
+        "purpose": "Receive patient intake submissions (PHI) and keep the infrastructure that stores them audit-defensible under the HIPAA Security Rule.",
+        "props": [
+          {
+            "name": "primary-framework",
+            "value": "HIPAA Security Rule (45 CFR 164 Subpart C)"
+          },
+          {
+            "name": "repository",
+            "value": "https://github.com/SeraphimO120/cgep-app-starter"
+          },
+          {
+            "name": "aws-region",
+            "value": "us-east-1"
+          }
+        ],
+        "responsible-roles": [
+          {
+            "role-id": "provider",
+            "party-uuids": [
+              "b689b489-345a-42f2-b68f-8fe37bf82bea"
+            ]
+          }
+        ],
+        "control-implementations": [
+          {
+            "uuid": "8fe734e4-548e-41dc-b348-4e81077e8066",
+            "source": "https://doi.org/10.6028/NIST.SP.800-66r2",
+            "description": "HIPAA Security Rule safeguards implemented by this system. NIST SP 800-66 Rev. 2 (Implementing the HIPAA Security Rule) is the catalog source; each requirement carries its 45 CFR 164 citation in the hipaa-citation prop. Not claimed: GAP-05 (Lambda outside the VPC), GAP-06 (concurrency, DLQ, tracing), and GAP-08 (API access logging and throttling) remain open, and Physical Safeguards (164.310) are inherited from AWS.",
+            "implemented-requirements": [
+              {
+                "uuid": "6802a85e-5eb8-4b76-9e55-8ac4643d48f2",
+                "control-id": "hipaa-164.312-a-2-iv",
+                "description": "PHI at rest is encrypted under a customer-managed KMS key with automatic rotation. The uploads bucket uses SSE-KMS with S3 Bucket Keys (GAP-01) and the submissions table uses server-side encryption with the same key (GAP-02). The Rego policies block any S3 bucket that holds PHI without SSE-KMS under an aws_kms_key, and any DynamoDB table without a customer-managed key. CloudTrail log buckets are a documented exception (account activity, not PHI).",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(a)(2)(iv)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "gap",
+                    "value": "GAP-01; GAP-02"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_kms_key.phi"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_server_side_encryption_configuration.uploads"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_dynamodb_table.intake"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_server_side_encryption_configuration.evidence"
+                  },
+                  {
+                    "name": "rego-policy",
+                    "value": "policies/hipaa_s3_cmk.rego; policies/hipaa_dynamodb_cmk.rego"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "6bdb659b-3855-4278-98a8-3813d816d58a",
+                "control-id": "hipaa-164.312-e-1",
+                "description": "Every S3 bucket defined in this Terraform configuration (uploads, evidence vault, CloudTrail logs) has a bucket policy that denies any request where aws:SecureTransport is false, so PHI and evidence cannot move over plaintext HTTP (GAP-03). The Rego policy fails the gate when a bucket has no policy or its rendered policy lacks the TLS deny.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(e)(1)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "gap",
+                    "value": "GAP-03"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_policy.uploads"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_policy.evidence"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_policy.trail"
+                  },
+                  {
+                    "name": "rego-policy",
+                    "value": "policies/hipaa_s3_tls.rego"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "3d6541ce-668c-4af0-b2b3-e7af2d6e4c50",
+                "control-id": "hipaa-164.308-a-7-ii-a",
+                "description": "Versioning is enabled on the uploads bucket so overwritten or deleted PHI objects are recoverable (GAP-04). The evidence vault and CloudTrail log bucket are versioned as well. The Rego policy fails the gate for any bucket without versioning set to Enabled.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.308(a)(7)(ii)(A)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "gap",
+                    "value": "GAP-04"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_versioning.uploads"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_versioning.evidence"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_versioning.trail"
+                  },
+                  {
+                    "name": "rego-policy",
+                    "value": "policies/hipaa_s3_versioning.rego"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "90587faa-4fce-4e08-8e5b-f36351c9ae5d",
+                "control-id": "hipaa-164.312-a-1",
+                "description": "The intake Lambda role is reduced from dynamodb:* and s3:* to dynamodb:PutItem on the submissions table, s3:PutObject on the uploads/ prefix, and the KMS actions needed for its key (GAP-07). Pipeline access is split: pull requests assume a read-only plan role that cannot decrypt PHI, and only pushes to main assume the apply role. The Rego policy fails the gate on any wildcard action in an IAM Allow statement; red PR run 38051205888 shows the gate blocking a reintroduced dynamodb:*.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(a)(1)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "gap",
+                    "value": "GAP-07"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role_policy.lambda_inline"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role.gha_plan"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role_policy.gha_plan"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role.gha_apply"
+                  },
+                  {
+                    "name": "rego-policy",
+                    "value": "policies/hipaa_iam_least_privilege.rego"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051205888/evidence-38051205888-826b40ec9ccd72556cf0fbc8f664499885aae124.tar.gz",
+                    "text": "Red PR run 38051205888 (gate blocked GAP-07 regression): signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051205888/evidence-38051205888-826b40ec9ccd72556cf0fbc8f664499885aae124.tar.gz.sigstore.json",
+                    "text": "Red PR run 38051205888 (gate blocked GAP-07 regression): Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "75a7f1be-8306-4265-8017-76b89a6cbc63",
+                "control-id": "hipaa-164.312-b",
+                "description": "A multi-region CloudTrail trail records management events, including global services, to a dedicated, versioned bucket with log-file validation enabled. Every pipeline run records its plan, policy results, and run metadata as a signed evidence bundle.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(b)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_cloudtrail.mgmt"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket.trail"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "26f18a10-2523-4190-b06a-0ab2035a6bfd",
+                "control-id": "hipaa-164.312-c-1",
+                "description": "Evidence integrity is protected three ways: each bundle is hashed (SHA-256) and signed with Cosign keyless signing tied to the workflow's GitHub OIDC identity and recorded in the Rekor transparency log; bundles land in an S3 bucket with Object Lock (GOVERNANCE mode, 30-day default retention) and versioning; and CloudTrail log-file validation makes log tampering detectable.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(c)(1)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket.evidence"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_s3_bucket_object_lock_configuration.evidence"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_cloudtrail.mgmt"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38050849986/evidence-38050849986-e86d043a94e0c1c70f830ec2deec1dce9ef61761.tar.gz",
+                    "text": "Merge run 38050849986 (apply on merge to main): signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38050849986/evidence-38050849986-e86d043a94e0c1c70f830ec2deec1dce9ef61761.tar.gz.sigstore.json",
+                    "text": "Merge run 38050849986 (apply on merge to main): Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              },
+              {
+                "uuid": "ca569c85-d503-4102-aef1-33d259728fc3",
+                "control-id": "hipaa-164.312-d",
+                "description": "The CI pipeline authenticates to AWS with GitHub OIDC; no long-lived AWS keys are stored. Role trust policies pin the token audience to sts.amazonaws.com and the subject to GitHub's immutable owner and repository IDs, separately for pull requests and for the main branch, so a renamed or re-created repository cannot assume either role.",
+                "props": [
+                  {
+                    "name": "hipaa-citation",
+                    "value": "164.312(d)"
+                  },
+                  {
+                    "name": "implementation-status",
+                    "value": "implemented"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_openid_connect_provider.github"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role.gha_plan"
+                  },
+                  {
+                    "name": "terraform-resource",
+                    "value": "aws_iam_role.gha_apply"
+                  }
+                ],
+                "links": [
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz",
+                    "text": "Run 38051692529 on main: signed evidence bundle (plan.json, policy results, run metadata)."
+                  },
+                  {
+                    "rel": "evidence",
+                    "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
+                    "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
