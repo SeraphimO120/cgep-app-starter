@@ -3,7 +3,8 @@
 # description: Every S3 bucket that can hold PHI must use SSE-KMS with a customer-managed key. CloudTrail log buckets are exempt (account activity, not PHI; see DECISIONS.md).
 # custom:
 #   gap: GAP-01
-#   control_id: "164.312(a)(2)(iv)"
+#   controls:
+#     - "164.312(a)(2)(iv)"
 #   framework: hipaa
 #   severity: high
 #   remediation: Add aws_s3_bucket_server_side_encryption_configuration with sse_algorithm "aws:kms" and kms_master_key_id referencing an aws_kms_key.

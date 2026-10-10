@@ -3,7 +3,8 @@
 # description: Every DynamoDB table must enable server-side encryption with a customer-managed key, not the AWS-owned default.
 # custom:
 #   gap: GAP-02
-#   control_id: "164.312(a)(2)(iv)"
+#   controls:
+#     - "164.312(a)(2)(iv)"
 #   framework: hipaa
 #   severity: high
 #   remediation: Add a server_side_encryption block with enabled = true and kms_key_arn referencing an aws_kms_key.

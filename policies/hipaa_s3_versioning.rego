@@ -3,7 +3,8 @@
 # description: Every S3 bucket must have versioning enabled so overwritten or deleted objects can be recovered.
 # custom:
 #   gap: GAP-04
-#   control_id: "164.308(a)(7)(ii)(A)"
+#   controls:
+#     - "164.308(a)(7)(ii)(A)"
 #   framework: hipaa
 #   severity: medium
 #   remediation: Add aws_s3_bucket_versioning with versioning_configuration status = "Enabled".

@@ -3,7 +3,8 @@
 # description: IAM policies must not grant service-wide wildcards (for example dynamodb:* or s3:*) or "*" in Allow statements.
 # custom:
 #   gap: GAP-07
-#   control_id: "164.312(a)(1)"
+#   controls:
+#     - "164.312(a)(1)"
 #   framework: hipaa
 #   severity: high
 #   remediation: Replace wildcard actions with the specific API calls the workload makes.

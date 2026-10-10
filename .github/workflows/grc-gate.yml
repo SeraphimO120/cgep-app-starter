@@ -78,7 +78,7 @@ jobs:
       - name: Policy unit tests
         run: conftest verify --policy policies | tee evidence/policy-tests.txt
 
-      - name: Terraform plan
+      - name: Plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init -input=false
@@ -86,7 +86,7 @@ jobs:
           terraform plan -input=false -no-color -out=tfplan | tee ../evidence/plan.txt
           terraform show -json tfplan > ../evidence/plan.json
 
-      - name: Conftest policy gate
+      - name: Policy check
         id: gate
         run: |
           conftest test --policy policies --all-namespaces --output=json evidence/plan.json \
@@ -98,16 +98,15 @@ jobs:
           echo "Policy gate: ${FAILS} failure(s), ${WARNS} warning(s)"
           conftest test --policy policies --all-namespaces evidence/plan.json || true
 
-      - name: Terraform apply (main only, gate must pass)
+      - name: Apply (on merge to main, gate must pass)
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.gate.outputs.failures == '0'
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -input=false -no-color tfplan | tee ../evidence/apply.txt
 
-      - name: Bundle, sign, and upload to vault
+      - name: Sign
         id: sign
         if: always()
         env:
-          VAULT: ${{ vars.EVIDENCE_VAULT }}
           RUN_ID: ${{ github.run_id }}
           SHA: ${{ github.sha }}
         run: |
@@ -116,10 +115,20 @@ jobs:
           BUNDLE="evidence-${RUN_ID}-${SHA}.tar.gz"
           tar -czf "${BUNDLE}" -C evidence .
           sha256sum "${BUNDLE}" | awk '{print $1}' > "${BUNDLE}.sha256"
-
           # Keyless signing: the GitHub OIDC identity of this workflow run is the signer.
           cosign sign-blob --yes --bundle "${BUNDLE}.sigstore.json" "${BUNDLE}"
+          echo "bundle=${BUNDLE}" >> "$GITHUB_OUTPUT"
 
+      - name: Upload
+        id: upload
+        if: always() && steps.sign.outcome == 'success'
+        env:
+          VAULT: ${{ vars.EVIDENCE_VAULT }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          BUNDLE: ${{ steps.sign.outputs.bundle }}
+        run: |
+          set -euo pipefail
           PREFIX="runs/${RUN_ID}"
           aws s3 cp "${BUNDLE}"                "s3://${VAULT}/${PREFIX}/${BUNDLE}"
           aws s3 cp "${BUNDLE}.sha256"         "s3://${VAULT}/${PREFIX}/${BUNDLE}.sha256"
@@ -161,7 +170,7 @@ jobs:
             ## GRC gate run ${{ github.run_id }}
 
             - Policy gate: **${{ steps.gate.outputs.failures }} failure(s)**, ${{ steps.gate.outputs.warnings }} warning(s)
-            - Sign and vault upload: `${{ steps.sign.outcome }}`
+            - Sign: `${{ steps.sign.outcome }}`, Upload: `${{ steps.upload.outcome }}`
             - Evidence: `s3://${{ vars.EVIDENCE_VAULT }}/runs/${{ github.run_id }}/`
 
       - name: Enforce gate decision

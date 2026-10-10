@@ -3,7 +3,8 @@
 # description: Every S3 bucket must have a bucket policy that denies requests where aws:SecureTransport is false.
 # custom:
 #   gap: GAP-03
-#   control_id: "164.312(e)(1)"
+#   controls:
+#     - "164.312(e)(1)"
 #   framework: hipaa
 #   severity: high
 #   remediation: Attach an aws_s3_bucket_policy with a Deny statement conditioned on aws:SecureTransport = false.
