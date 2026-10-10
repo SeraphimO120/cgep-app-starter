@@ -180,7 +180,7 @@ resource "aws_iam_role_policy" "lambda_inline" {
         Statement = [
       {
         Effect   = "Allow"
-        Action   = ["dynamodb:PutItem"]
+        Action   = ["dynamodb:*"]
         Resource = aws_dynamodb_table.intake.arn
       },
       {
