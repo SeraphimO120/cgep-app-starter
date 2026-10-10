@@ -58,22 +58,23 @@ jobs:
           cosign version
 
       - name: Record run metadata
+        # Built from runner-provided environment variables, never ${{ }} interpolation
+        # inside the script, and serialized with jq so no value can break the JSON.
         run: |
           mkdir -p evidence
-          cat > evidence/run-metadata.json <<META
-          {
-            "run_id": "${{ github.run_id }}",
-            "run_attempt": "${{ github.run_attempt }}",
-            "event": "${{ github.event_name }}",
-            "ref": "${{ github.ref }}",
-            "commit": "${{ github.sha }}",
-            "actor": "${{ github.actor }}",
-            "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "terraform": "${TF_VERSION}",
-            "conftest": "${CONFTEST_VERSION}",
-            "cosign": "${COSIGN_VERSION}"
-          }
-          META
+          jq -n \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg event "$GITHUB_EVENT_NAME" \
+            --arg ref "$GITHUB_REF" \
+            --arg commit "$GITHUB_SHA" \
+            --arg actor "$GITHUB_ACTOR" \
+            --arg started_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg terraform "$TF_VERSION" \
+            --arg conftest "$CONFTEST_VERSION" \
+            --arg cosign "$COSIGN_VERSION" \
+            '$ARGS.named' > evidence/run-metadata.json
+          cat evidence/run-metadata.json
 
       - name: Policy unit tests
         run: conftest verify --policy policies | tee evidence/policy-tests.txt
