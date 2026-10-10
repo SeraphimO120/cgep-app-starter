@@ -1,40 +1,62 @@
-# Design Decisions
+# Decision Log
 
-## Primary framework: HIPAA Security Rule
+Decisions in the order they were made, with the reason and the trade-off. [WRITEUP.md](WRITEUP.md) tells the same story as a narrative for stakeholders; this file is the record.
 
-The Patient Intake API stores and processes PHI, which makes HIPAA a legal obligation the day the system goes live. SOC 2 answers one enterprise customer's request, and CMMC Level 2 depends on a federal pilot that may never close. I chose the obligation over the opportunities.
+## 2026-10-04: Design and baseline
 
-Scope stays honest about what code can prove. This build implements the Technical Safeguards (164.312) and the contingency requirement in 164.308(a)(7). Physical Safeguards (164.310) are inherited from AWS under the shared responsibility model and are not claimed here.
+**1. Primary framework: HIPAA Security Rule.**
+The Patient Intake API stores PHI, which makes HIPAA a legal obligation the day the system goes live. SOC 2 answers one enterprise customer's request, and CMMC Level 2 depends on a federal pilot that may never close. Scope: Technical Safeguards (164.312) plus 164.308(a)(7)(ii)(A). Physical Safeguards (164.310) are inherited from AWS and not claimed. SOC 2 and CMMC appear only as cross-references.
 
-## Gap selection
+**2. Gap selection: GAP-01, 02, 03, 04, 07.**
+Each carries a primary HIPAA control and is visible in a Terraform plan, which is what makes a plan-time gate meaningful. GAP-06 maps only to SOC 2 and CMMC, so it cannot carry a primary policy under HIPAA. GAP-05 and GAP-08 were deferred for time; see WRITEUP.md for the approach to each.
 
-Five gaps carry a primary HIPAA control and are detectable in a Terraform plan, so they anchor the policy suite.
+**3. One customer-managed KMS key for every PHI store and the evidence vault.**
+Rotation on. S3 Bucket Keys on to cut KMS request volume and cost. 7-day deletion window, which fits a sandbox. One key keeps the custody story simple; production would split keys by data class so a single key policy does not govern everything.
 
-| Gap | Remediation | HIPAA control |
-|---|---|---|
-| GAP-01 | Uploads bucket encrypted with SSE-KMS under a customer-managed key | 164.312(a)(2)(iv) |
-| GAP-02 | DynamoDB table encrypted with the same customer-managed key | 164.312(a)(2)(iv) |
-| GAP-03 | Uploads bucket policy denies any request not made over TLS | 164.312(e)(1) |
-| GAP-04 | Versioning enabled on the uploads bucket | 164.308(a)(7) |
-| GAP-07 | Lambda role reduced from dynamodb:* and s3:* to PutItem and PutObject on the uploads/ prefix | 164.312(a)(1) |
+**4. Lambda reduced to what the handler actually calls.**
+The handler only calls `PutItem` and `PutObject`, so the role grants `dynamodb:PutItem` on the table, `s3:PutObject` on `uploads/*`, and the KMS actions for the one key the stores now use. The first smoke test after this change returned a 500; a retry 60 seconds later passed. IAM and encryption changes need a short propagation window, which matters for any automated post-deploy test.
 
-GAP-06 maps only to SOC 2 and CMMC. It carries no primary policy under HIPAA. If closed, it is closed in Terraform and cross-referenced to SOC 2 CC7.2.
+**5. Evidence vault: Object Lock GOVERNANCE mode, 30-day default retention.**
+Retention covers the grading window and the sandbox can still be cleaned up by a principal holding `s3:BypassGovernanceRetention`. COMPLIANCE mode would block every deletion by anyone for 30 days. Production: COMPLIANCE mode, retention aligned to HIPAA's six-year documentation requirement (164.316(b)(2)).
 
-## Encryption key
+**6. CloudTrail bucket on SSE-S3, not the CMK.**
+Using the CMK would mean granting CloudTrail rights in the key policy, and the logs record account activity, not PHI. Log-file validation keeps tampering detectable regardless of the key. Documented trade-off, not a gap.
 
-One customer-managed KMS key protects every PHI store and the evidence vault, with automatic rotation enabled. S3 Bucket Keys are on to reduce KMS request volume and cost. The 7-day deletion window fits a sandbox.
+## 2026-10-10: Policy, pipeline, OSCAL
 
-## Evidence vault: GOVERNANCE mode, 30-day retention
+**7. Policies read plan references, not values.**
+At plan time many values are unknown, but `configuration` references are always present, so the policies ask "is an encryption resource wired to this bucket?" rather than comparing names. Additional rules:
+- `hipaa_s3_cmk` exempts CloudTrail log buckets by detecting which bucket an `aws_cloudtrail` resource writes to, not by name, so the exemption cannot be claimed by renaming a PHI bucket.
+- `hipaa_iam_least_privilege` checks Allow statements only, because the TLS Deny statements correctly use `s3:*`.
+- `hipaa_s3_tls` and `hipaa_iam_least_privilege` warn instead of failing when the rendered policy JSON is unknown (brand-new resources), so a first deploy is not blocked. Against the running stack both evaluate fully.
+- Metadata follows the starter's convention: `framework`, `controls`, `severity`, `remediation`. Every deny message cites the 164.x control.
 
-Every bundle is locked for 30 days, which keeps retention active through grading. GOVERNANCE mode allows an authorized principal to remove objects after review, so the sandbox can be cleaned up afterward. COMPLIANCE mode would block every deletion, by anyone, for the full 30 days. In production, evidence would move to COMPLIANCE mode with retention aligned to HIPAA's six-year documentation requirement (164.316(b)(2)).
+**8. TLS deny added to the CloudTrail bucket.**
+Writing `hipaa_s3_tls` exposed that the trail bucket built on 10-04 had no TLS deny. Fixed the bucket rather than exempting it.
 
-## CloudTrail: AWS-managed encryption
+**9. Remote state in S3 with native locking.**
+The pipeline cannot read state on a laptop. State moved to a versioned bucket with public access blocked and Terraform's native S3 lockfile (Terraform 1.10 or later), so no DynamoDB lock table is needed. The bucket was created with the AWS CLI because Terraform cannot create the bucket that holds its own state, which leaves it outside the policy suite. Its name uses the deployment suffix, not the account ID, because the repo is public.
 
-The trail bucket uses SSE-S3 rather than the customer-managed key. Using the CMK would require granting CloudTrail rights in the key policy, and these logs record account activity, not PHI. Log-file validation is enabled, so tampering stays detectable regardless of the encryption key. This is a documented trade-off, not a gap.
+**10. Two CI roles instead of one.**
+Pull requests assume a plan role: `ReadOnlyAccess`, the state lockfile, and evidence upload, with `kms:GenerateDataKey` but no `kms:Decrypt`, so an untrusted PR can neither change infrastructure nor read PHI. Only pushes to `main` assume the apply role. Trade-off: the apply role holds `AdministratorAccess`; a scoped deploy policy is next-sprint work.
 
-## Open items
+**11. OIDC trust pinned to GitHub's immutable subject.**
+The first run failed because GitHub issues this repo's tokens as `repo:SeraphimO120@324516250/cgep-app-starter@1404925327:...`. Kept the immutable form rather than switching the repo back to name-based subjects: a released name can be claimed by someone else, a numeric ID cannot.
 
-- Rego policies for the five gaps above, each citing its HIPAA control in the deny message
-- GitHub Actions gate: plan, policy check, apply, sign, upload
-- OSCAL component definition citing NIST SP 800-66 Rev. 2 as the catalog
+**12. Pipeline built from the course's reference workflow.**
+Adapted, not rewritten: two-role switch, an apply step, five named steps (Plan, Policy check, Apply, Sign, Upload), and run metadata plus policy test output in every bundle. tfsec was dropped because it is deprecated and was first on the scope-cut list. Evidence is signed and stored even when the gate fails; the job fails last. Each run also publishes the bundle as a GitHub Actions artifact so a grader without AWS access can verify it.
 
+**13. Tool versions pinned to match local tooling.**
+Terraform 1.16.5, Conftest 0.71.0, Cosign v3.1.3. Older Terraform cannot read state written by newer Terraform, and Cosign v3 changed its bundle format, so mismatched signing and verifying versions were a real risk.
+
+**14. Apply on merge, no manual approval gate.**
+The gate is the reviewer for a single-engineer system, and apply runs only with zero policy failures. Branch protection on `main` requires the `grc-gate` check; admins are exempt so the final commits could land. Production: enforce for admins and add a GitHub environment with a required reviewer.
+
+**15. Single AWS account, us-east-1.**
+Acceptable for 30 days per the brief; us-east-1 is the starter default and HIPAA sets no residency requirement. The weak point is that an administrator in the audited account could bypass GOVERNANCE retention. Production: dedicated log-archive account in COMPLIANCE mode.
+
+**16. OSCAL catalog: NIST SP 800-66 Rev. 2.**
+No official OSCAL catalog exists for HIPAA, so the component cites SP 800-66 Rev. 2 as `source` and carries each 164.x citation as a prop, with SOC 2 and CMMC cross-references as secondary props. 164.312(d) is marked partial: the pipeline authenticates with OIDC, but the intake API accepts unauthenticated requests.
+
+**17. Verification pinned to this workflow's identity.**
+The reference verify script accepted any signer (`.*`). `scripts/verify-evidence.sh` requires the certificate identity to be this repo's `grc-gate.yml`, which proves who signed, not just that something was signed.

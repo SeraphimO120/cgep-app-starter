@@ -3,8 +3,8 @@
     "uuid": "441f1d74-040d-4a85-a974-b36fc05a0b9f",
     "metadata": {
       "title": "Acme Health Patient Intake API with HIPAA GRC controls",
-      "last-modified": "2026-10-10T13:00:00.000000+00:00",
-      "version": "1.0.0",
+      "last-modified": "2026-10-10T15:00:00.000000+00:00",
+      "version": "1.1.0",
       "oscal-version": "1.2.1",
       "roles": [
         {
@@ -70,7 +70,7 @@
           {
             "uuid": "8fe734e4-548e-41dc-b348-4e81077e8066",
             "source": "https://doi.org/10.6028/NIST.SP.800-66r2",
-            "description": "HIPAA Security Rule safeguards implemented by this system. NIST SP 800-66 Rev. 2 (Implementing the HIPAA Security Rule) is the catalog source; each requirement carries its 45 CFR 164 citation in the hipaa-citation prop. Not claimed: GAP-05 (Lambda outside the VPC), GAP-06 (concurrency, DLQ, tracing), and GAP-08 (API access logging and throttling) remain open, and Physical Safeguards (164.310) are inherited from AWS.",
+            "description": "HIPAA Security Rule safeguards implemented by this system. NIST SP 800-66 Rev. 2 (Implementing the HIPAA Security Rule) is the catalog source; each requirement carries its 45 CFR 164 citation in the hipaa-citation prop. Not claimed: GAP-05 (Lambda outside the VPC), GAP-06 (concurrency, DLQ, tracing), and GAP-08 (API access logging and throttling) remain open; patient data lifecycle (deletion, export, retention) and API-layer authentication are known gaps outside GAPS.md; and Physical Safeguards (164.310) are inherited from AWS.",
             "implemented-requirements": [
               {
                 "uuid": "6802a85e-5eb8-4b76-9e55-8ac4643d48f2",
@@ -108,6 +108,16 @@
                   {
                     "name": "rego-policy",
                     "value": "policies/hipaa_s3_cmk.rego; policies/hipaa_dynamodb_cmk.rego"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "CC6.1"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "SC.L2-3.13.11"
                   }
                 ],
                 "links": [
@@ -155,6 +165,16 @@
                   {
                     "name": "rego-policy",
                     "value": "policies/hipaa_s3_tls.rego"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "CC6.7"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "SC.L2-3.13.8"
                   }
                 ],
                 "links": [
@@ -202,6 +222,16 @@
                   {
                     "name": "rego-policy",
                     "value": "policies/hipaa_s3_versioning.rego"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "A1.2"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "MP.L2-3.8.9"
                   }
                 ],
                 "links": [
@@ -253,6 +283,16 @@
                   {
                     "name": "rego-policy",
                     "value": "policies/hipaa_iam_least_privilege.rego"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "CC6.3"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "AC.L2-3.1.5"
                   }
                 ],
                 "links": [
@@ -298,6 +338,16 @@
                   {
                     "name": "terraform-resource",
                     "value": "aws_s3_bucket.trail"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "soc2",
+                    "value": "CC7.2"
+                  },
+                  {
+                    "name": "secondary-control",
+                    "class": "cmmc-l2",
+                    "value": "AU.L2-3.3.1"
                   }
                 ],
                 "links": [
@@ -373,7 +423,7 @@
                   },
                   {
                     "name": "implementation-status",
-                    "value": "implemented"
+                    "value": "partial"
                   },
                   {
                     "name": "terraform-resource",
@@ -399,7 +449,14 @@
                     "href": "s3://acme-health-intake-evidence-5434b2b8/runs/38051692529/evidence-38051692529-f83b4798ebd175f5909e0e96ef717b13c369717a.tar.gz.sigstore.json",
                     "text": "Run 38051692529 on main: Cosign keyless signature bundle (Fulcio certificate + Rekor entry)."
                   }
-                ]
+                ],
+                "remarks": "Implemented for infrastructure change: only authenticated GitHub workflow identities can plan or apply. Not implemented at the API layer: the intake endpoint accepts unauthenticated POST requests. API authentication is out of scope for the starter (WORKLOAD.md) and is listed as a known gap in WRITEUP.md."
+              }
+            ],
+            "props": [
+              {
+                "name": "framework",
+                "value": "HIPAA Security Rule (45 CFR 164 Subpart C)"
               }
             ]
           }
