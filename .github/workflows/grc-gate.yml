@@ -1,9 +1,12 @@
 # .github/workflows/grc-gate.yml
 #
 # GRC gate for the Acme Health Patient Intake API.
-#   Pull request -> plan role (read-only, no PHI decrypt): plan, policy gate, sign, vault.
-#   Push to main -> apply role: plan, policy gate, apply if the gate passes, sign, vault.
-# Evidence is signed and stored even when the gate fails; the job fails last.
+#   Pull request   -> plan role (read-only, no PHI decrypt): plan, policy gate, sign, vault.
+#   Push to main   -> apply role: plan, policy gate, apply if the gate passes,
+#                     live control tests, sign, vault.
+#   Nightly / manual -> plan role: drift check (plan must show no changes),
+#                     live control tests, sign, vault.
+# Evidence is signed and stored even when a check fails; the job fails last.
 
 name: grc-gate
 
@@ -12,6 +15,8 @@ on:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    - cron: "17 6 * * *" # nightly drift + control tests, 06:17 UTC
   workflow_dispatch:
 
 permissions:
@@ -29,21 +34,29 @@ env:
   TF_VERSION: 1.16.5
   CONFTEST_VERSION: 0.71.0
   COSIGN_VERSION: v3.1.3
+  # Retry transient AWS API failures (throttling, 5xx) during upload and plan.
+  AWS_RETRY_MODE: adaptive
+  AWS_MAX_ATTEMPTS: "10"
 
 jobs:
   grc-gate:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Explicit bash runs every step with -eo pipefail, so a failing
+        # terraform or conftest command cannot be masked by "| tee".
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
-          role-to-assume: ${{ github.event_name == 'pull_request' && vars.AWS_PLAN_ROLE_ARN || vars.AWS_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ github.event_name == 'push' && vars.AWS_APPLY_ROLE_ARN || vars.AWS_PLAN_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
@@ -80,11 +93,18 @@ jobs:
         run: conftest verify --policy policies | tee evidence/policy-tests.txt
 
       - name: Plan
+        id: plan
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform init -input=false
           terraform validate
-          terraform plan -input=false -no-color -out=tfplan | tee ../evidence/plan.txt
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode -out=tfplan | tee ../evidence/plan.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          # 0 = no changes, 2 = changes present, anything else = error
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then exit "$rc"; fi
+          if [ "$rc" -eq 2 ]; then echo "changes=true" >> "$GITHUB_OUTPUT"; else echo "changes=false" >> "$GITHUB_OUTPUT"; fi
           terraform show -json tfplan > ../evidence/plan.json
 
       - name: Policy check
@@ -100,9 +120,32 @@ jobs:
           conftest test --policy policies --all-namespaces evidence/plan.json || true
 
       - name: Apply (on merge to main, gate must pass)
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && steps.gate.outputs.failures == '0'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.gate.outputs.failures == '0'
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -input=false -no-color tfplan | tee ../evidence/apply.txt
+
+      - name: Drift check (nightly and manual runs)
+        id: drift
+        if: always() && steps.plan.outcome == 'success' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        env:
+          CHANGES: ${{ steps.plan.outputs.changes }}
+        run: |
+          if [ "$CHANGES" = "true" ]; then
+            echo "DRIFT: the live infrastructure no longer matches main. See plan.txt in this bundle." | tee evidence/drift.txt
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No drift: live infrastructure matches main." | tee evidence/drift.txt
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Live control tests
+        id: controls
+        if: always() && steps.plan.outcome == 'success' && github.event_name != 'pull_request'
+        run: |
+          set +e
+          scripts/control-tests.sh evidence/control-tests.json
+          set -e
+          echo "failures=$(jq -r '.failures // "error"' evidence/control-tests.json 2>/dev/null || echo error)" >> "$GITHUB_OUTPUT"
 
       - name: Sign
         id: sign
@@ -153,7 +196,7 @@ jobs:
 
       - name: Upload evidence artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: grc-evidence-${{ github.run_id }}
           path: |
@@ -164,7 +207,7 @@ jobs:
 
       - name: Comment on PR
         if: always() && github.event_name == 'pull_request'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
@@ -178,13 +221,21 @@ jobs:
         if: always()
         env:
           FAILS: ${{ steps.gate.outputs.failures }}
+          CONTROL_FAILS: ${{ steps.controls.outputs.failures }}
+          CONTROLS_RAN: ${{ steps.controls.outcome }}
+          DRIFT: ${{ steps.drift.outputs.drift }}
         run: |
+          status=0
           if [ -z "${FAILS}" ]; then
-            echo "GRC gate FAILED: the policy gate never ran. Check the earlier steps."
-            exit 1
+            echo "FAILED: the policy gate never ran. Check the earlier steps."; status=1
+          elif [ "${FAILS}" != "0" ]; then
+            echo "FAILED: ${FAILS} policy failure(s)."; status=1
           fi
-          if [ "${FAILS}" != "0" ]; then
-            echo "GRC gate FAILED: ${FAILS} policy failure(s). Evidence was signed and stored."
-            exit 1
+          if [ "${CONTROLS_RAN}" = "success" ] && [ "${CONTROL_FAILS}" != "0" ]; then
+            echo "FAILED: live control tests reported ${CONTROL_FAILS} failure(s)."; status=1
           fi
-          echo "GRC gate PASSED."
+          if [ "${DRIFT}" = "true" ]; then
+            echo "FAILED: drift detected between main and the live account."; status=1
+          fi
+          if [ "$status" -eq 0 ]; then echo "GRC gate PASSED."; else echo "Evidence for this run was signed and stored."; fi
+          exit "$status"

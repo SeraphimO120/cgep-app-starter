@@ -28,3 +28,16 @@ test_fail_missing if {
 test_fail_suspended if {
 	count(hipaa_s3_versioning.deny) == 1 with input as plan([cfg_bucket, versioning("Suspended")])
 }
+
+# Edge: versioning wired to a different bucket does not count.
+test_fail_versioning_on_other_bucket if {
+	other := {
+		"type": "aws_s3_bucket_versioning",
+		"name": "logs",
+		"expressions": {
+			"bucket": {"references": ["aws_s3_bucket.logs.id", "aws_s3_bucket.logs"]},
+			"versioning_configuration": [{"status": {"constant_value": "Enabled"}}],
+		},
+	}
+	count(hipaa_s3_versioning.deny) == 1 with input as plan([cfg_bucket, other])
+}

@@ -14,11 +14,15 @@ locals {
 ######################################################################
 
 locals {
-  github_repo       = "SeraphimO120/cgep-app-starter"
+  # GitHub issues this repo's tokens with immutable owner and repo IDs.
   github_sub_prefix = "repo:SeraphimO120@324516250/cgep-app-starter@1404925327"
   state_bucket      = "acme-health-intake-tfstate-5434b2b8"
 }
-# ---------- Plan role: pull requests only ----------
+
+# ---------- Plan role: pull requests, nightly drift, manual runs ----------
+# Read-only. Cannot decrypt PHI. Used for every run that must not change
+# infrastructure: PR gates, the nightly drift and control-test run, and
+# manual dispatches from main.
 
 resource "aws_iam_role" "gha_plan" {
   name = "${local.name_prefix}-gha-plan-${local.suffix}"
@@ -31,7 +35,10 @@ resource "aws_iam_role" "gha_plan" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "${local.github_sub_prefix}:pull_request"
+          "token.actions.githubusercontent.com:sub" = [
+            "${local.github_sub_prefix}:pull_request",
+            "${local.github_sub_prefix}:ref:refs/heads/main",
+          ]
         }
       }
     }]
@@ -66,12 +73,18 @@ resource "aws_iam_role_policy" "gha_plan" {
         Effect   = "Allow"
         Action   = ["kms:GenerateDataKey"]
         Resource = aws_kms_key.phi.arn
+      },
+      {
+        Sid      = "LiveLeastPrivilegeTest"
+        Effect   = "Allow"
+        Action   = ["iam:SimulatePrincipalPolicy"]
+        Resource = aws_iam_role.lambda.arn
       }
     ]
   })
 }
 
-# ---------- Apply role: main branch only ----------
+# ---------- Apply role: pushes to main only ----------
 
 resource "aws_iam_role" "gha_apply" {
   name = "${local.name_prefix}-gha-apply-${local.suffix}"

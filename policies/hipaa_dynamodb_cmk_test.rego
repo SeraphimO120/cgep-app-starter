@@ -20,3 +20,11 @@ test_fail_default_encryption if {
 test_fail_enabled_without_cmk if {
 	count(hipaa_dynamodb_cmk.deny) == 1 with input as table({"server_side_encryption": [{"enabled": {"constant_value": true}}]})
 }
+
+# Edge: encryption explicitly disabled with a key reference still fails.
+test_fail_explicitly_disabled if {
+	count(hipaa_dynamodb_cmk.deny) == 1 with input as table({"server_side_encryption": [{
+		"enabled": {"constant_value": false},
+		"kms_key_arn": {"references": ["aws_kms_key.phi.arn", "aws_kms_key.phi"]},
+	}]})
+}

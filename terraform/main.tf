@@ -111,7 +111,7 @@ resource "aws_dynamodb_table" "intake" {
     type = "S"
   }
 
-   # GAP-02: customer CMK
+  # GAP-02: customer CMK
   server_side_encryption {
     enabled     = true
     kms_key_arn = aws_kms_key.phi.arn
@@ -177,7 +177,7 @@ resource "aws_iam_role_policy" "lambda_inline" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-        Statement = [
+    Statement = [
       {
         Effect   = "Allow"
         Action   = ["dynamodb:PutItem"]

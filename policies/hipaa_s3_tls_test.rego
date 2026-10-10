@@ -47,3 +47,23 @@ test_warn_when_policy_unknown if {
 	count(result.deny) == 0
 	count(result.warn) == 1
 }
+
+# Edge: aws_iam_policy_document renders condition values as a list.
+test_pass_condition_value_as_list if {
+	doc := {"Version": "2012-10-17", "Statement": [{
+		"Effect": "Deny", "Principal": "*", "Action": "s3:*",
+		"Resource": ["arn:aws:s3:::b", "arn:aws:s3:::b/*"],
+		"Condition": {"Bool": {"aws:SecureTransport": ["false"]}},
+	}]}
+	count(hipaa_s3_tls.deny) == 0 with input as plan([cfg_bucket, cfg_policy], pv_policy(doc))
+}
+
+# Edge: a Deny conditioned on SecureTransport = true is the wrong way round.
+test_fail_condition_inverted if {
+	doc := {"Version": "2012-10-17", "Statement": [{
+		"Effect": "Deny", "Principal": "*", "Action": "s3:*",
+		"Resource": "arn:aws:s3:::b/*",
+		"Condition": {"Bool": {"aws:SecureTransport": "true"}},
+	}]}
+	count(hipaa_s3_tls.deny) == 1 with input as plan([cfg_bucket, cfg_policy], pv_policy(doc))
+}

@@ -39,3 +39,18 @@ test_warn_when_policy_unknown if {
 	count(result.deny) == 0
 	count(result.warn) == 1
 }
+
+# Edge: a bare "*" action in a single (non-array) Statement on a managed policy.
+test_fail_full_wildcard_single_statement if {
+	inp := {"planned_values": {"root_module": {"resources": [{
+		"address": "aws_iam_policy.ops",
+		"type": "aws_iam_policy",
+		"values": {"policy": json.marshal({"Version": "2012-10-17", "Statement": {"Effect": "Allow", "Action": "*", "Resource": "*"}})},
+	}]}}}
+	count(hipaa_iam_least_privilege.deny) == 1 with input as inp
+}
+
+# Edge: scoped prefixes like s3:Get* are not service-wide wildcards.
+test_pass_scoped_prefix_wildcard if {
+	count(hipaa_iam_least_privilege.deny) == 0 with input as plan({"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "s3:Get*", "Resource": "arn:aws:s3:::b/*"}]})
+}
